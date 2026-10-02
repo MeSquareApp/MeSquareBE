@@ -17,4 +17,4 @@ uv run fastapi dev
 
 Once app runs, go to this link: http://localhost:8000/
 
-For documentation, go to this link: http://localhost:8000/
+For documentation, go to this link: http://localhost:8000/docs
