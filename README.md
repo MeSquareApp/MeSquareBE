@@ -14,3 +14,7 @@ If you want to run app locally with no docker, just run these 2 commands
 uv sync
 uv run fastapi dev
 ```
+
+Once app runs, go to this link: http://localhost:8000/
+
+For documentation, go to this link: http://localhost:8000/
