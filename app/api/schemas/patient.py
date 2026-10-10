@@ -48,3 +48,6 @@ class BiomarkerLogResponse(BaseModel):
     measured_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+class LinkPhysicianRequest(BaseModel):
+    physician_id: uuid.UUID
