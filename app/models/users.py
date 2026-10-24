@@ -42,8 +42,8 @@ class Patient(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
     date_of_birth: Mapped[date] = mapped_column()
     biological_sex: Mapped[str] = mapped_column(String)
-    baseline_height_ft: Mapped[float] = mapped_column()
-    baseline_weight_lbs: Mapped[float] = mapped_column()
+    baseline_height_cm: Mapped[float] = mapped_column()
+    baseline_weight_kg: Mapped[float] = mapped_column()
     allergies: Mapped[str] = mapped_column(String)
     medical_conditions: Mapped[str] = mapped_column(String)
 
