@@ -2,7 +2,7 @@
 # template covering bytecode, build artifacts, virtual environments, and IDE
 # settings. See https://git-scm.com/docs/gitignore for syntax reference.
 
-alembic/versions/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
