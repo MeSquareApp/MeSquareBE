@@ -2,6 +2,8 @@
 # template covering bytecode, build artifacts, virtual environments, and IDE
 # settings. See https://git-scm.com/docs/gitignore for syntax reference.
 
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

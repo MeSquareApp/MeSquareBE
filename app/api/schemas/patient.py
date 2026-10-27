@@ -15,16 +15,16 @@ class UserRead(BaseModel):
 
 # Patient Schemas
 class PatientUpdate(BaseModel):
-    baseline_height_ft: Optional[float] = Field(None, ge=0)
-    baseline_weight_lbs: Optional[float] = Field(None, ge=0)
+    baseline_height_cm: Optional[float] = Field(None, ge=0)
+    baseline_weight_kg: Optional[float] = Field(None, ge=0)
     allergies: Optional[str] = None
     medical_conditions: Optional[str] = None
 
 class PatientProfileResponse(BaseModel):
     date_of_birth: date
     biological_sex: str
-    baseline_height_ft: float
-    baseline_weight_lbs: float
+    baseline_height_cm: float
+    baseline_weight_kg: float
     allergies: str
     medical_conditions: str
     user: UserRead # Nests the core identity data inside the patient response
@@ -46,6 +46,14 @@ class BiomarkerLogResponse(BaseModel):
     unit: str
     measurement_method: str
     measured_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+class VitalsLogResponse(BaseModel):
+    """Vitals extracted from a single document; any vital the document did not contain is null."""
+    height_cm: Optional[float] = None
+    weight_kg: Optional[float] = None
+    systolic_bp: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 

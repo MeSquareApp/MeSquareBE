@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes.health import router as health_router
 from app.api.routes.patient import router as patient_router  # Import the patient router
 from app.api.routes.physician import router as physician_router # Import the physician router
+from app.api.routes.lab_results_bio_extract import router as extract_biomarkers_from_lab_results
+from app.api.routes.vitals_bio_extract import router as extract_vitals_from_visit_summary
 from app.core.db import engine
 
 
@@ -26,8 +28,10 @@ allow_headers=["*"],
 
 # Register the routers to the application
 app.include_router(health_router)
-app.include_router(patient_router)  # 2. Attach the patient endpoints
+app.include_router(patient_router)  
 app.include_router(physician_router)
+app.include_router(extract_biomarkers_from_lab_results)
+app.include_router(extract_vitals_from_visit_summary)
 
 
 @app.get("/")
