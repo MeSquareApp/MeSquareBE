@@ -34,8 +34,8 @@ class User(Base):
     last_name: Mapped[str] = mapped_column(String)
     role: Mapped[RoleEnum] = mapped_column(Enum(RoleEnum))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    auth0_issuer: Mapped[str | None] = mapped_column(String, nullable=True)
-    auth0_subject: Mapped[str | None] = mapped_column(String, nullable=True)
+    auth0_issuer: Mapped[str] = mapped_column(String)
+    auth0_subject: Mapped[str] = mapped_column(String)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # 1:1 Relationships mapped to the role entities

@@ -58,15 +58,16 @@ patient-physician relationship. Health-data upload routes use
 record. The former routes that accepted the caller's `user_id` are no longer
 registered.
 
-The `users` SQLAlchemy model expects nullable `auth0_issuer`,
-`auth0_subject`, and `last_used_at` columns. A unique constraint on
-`(auth0_issuer, auth0_subject)` identifies the one Auth0 identity linked to a
-MeSquared user while existing records can remain unlinked. The shared
-`get_current_user` dependency validates the token first, then resolves the
-verified issuer and subject to the internal `users.id`; unmapped identities
-receive 404. The model change does not alter a database. Add these columns and
-the unique constraint to the live schema before using this dependency against
-that database.
+The `users` SQLAlchemy model expects non-nullable `auth0_issuer` and
+`auth0_subject` columns plus a nullable `last_used_at` column. A unique
+constraint on `(auth0_issuer, auth0_subject)` identifies the one Auth0 identity
+linked to a MeSquared user; every user must have a linked identity because
+authentication is Auth0-only. The shared `get_current_user` dependency validates
+the token first, then resolves the verified issuer and subject to the internal
+`users.id`; unmapped identities receive 404. The Alembic migration
+`36043d5dc19e` adds these columns, drops the legacy `username` column, and
+removes pre-Auth0 users (they cannot authenticate once JWT validation is
+enforced).
 
 `last_used_at` is modeled as a nullable timestamp but is not updated by the
 current-user lookup: an authenticated API request is not necessarily a login.
