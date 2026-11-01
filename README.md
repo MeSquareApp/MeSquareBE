@@ -3,11 +3,12 @@
 Create file called ".env"
 
 Paste into file:
+``` m
 DATABASE_URL=
 LLAMA_CLOUD_API_KEY='your-key'
 AUTH0_DOMAIN=
 AUTH0_AUDIENCE=
-
+```
 # MeSquareBE
 
 Run 
