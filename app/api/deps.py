@@ -1,17 +1,87 @@
-from fastapi import Depends
-from app.core.security import verify_auth0_token
+from fastapi import Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-async def get_current_user(token_payload: dict = Depends(verify_auth0_token)) -> dict:
+from app.core.config import settings
+from app.core.db import get_db
+from app.core.security import verify_auth0_token
+from app.models.users import Patient, Physician, RoleEnum, User
+
+
+async def get_current_user(
+    token_payload: dict[str, object] = Depends(verify_auth0_token),
+    db: AsyncSession = Depends(get_db),
+) -> User:
     """
-    Extracts the user ID ('sub') from the token. 
-    You can use this 'sub' to query or sync user records inside Supabase.
+    Resolve the verified Auth0 issuer and subject to a MeSquared user record.
     """
-    user_id = token_payload.get("sub")
-    
-    # Optional: Fetch or verify user profile state from Supabase database here using user_id
-    
-    return {
-        "auth0_id": user_id,
-        "email": token_payload.get("email"),
-        "payload": token_payload
-    }
+    subject = token_payload.get("sub")
+    issuer = token_payload.get("iss")
+    expected_issuer = f"https://{settings.auth0_domain}/"
+
+    if (
+        not isinstance(subject, str)
+        or not subject
+        or not isinstance(issuer, str)
+        or issuer != expected_issuer
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    statement = select(User).where(
+        User.auth0_issuer == issuer,
+        User.auth0_subject == subject,
+    )
+    result = await db.execute(statement)
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No MeSquared account is linked to this Auth0 identity.",
+        )
+
+    return user
+
+
+async def get_current_patient(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Patient:
+    if user.role != RoleEnum.patient:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A patient account is required.",
+        )
+
+    result = await db.execute(select(Patient).where(Patient.user_id == user.id))
+    patient = result.scalar_one_or_none()
+    if patient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Patient profile not found.",
+        )
+    return patient
+
+
+async def get_current_physician(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Physician:
+    if user.role != RoleEnum.physician:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A physician account is required.",
+        )
+
+    result = await db.execute(select(Physician).where(Physician.user_id == user.id))
+    physician = result.scalar_one_or_none()
+    if physician is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Physician profile not found.",
+        )
+    return physician

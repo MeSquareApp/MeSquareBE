@@ -43,25 +43,35 @@ the API:
 uvicorn app.main:app --reload
 ```
 
-The Auth0 SDK example endpoints are:
+`app.core.security.verify_auth0_token` is the shared FastAPI dependency for
+validating Auth0 bearer access tokens. It resolves the tenant signing key from
+the tenant's JWKS endpoint and verifies the signature, RS256 algorithm,
+configured audience, and issuer before returning claims. Missing or invalid
+tokens receive a generic 401 response.
 
-- `GET /api/public` does not require a token.
-- `GET /api/private` requires a valid access token for this API.
-- `GET /api/private-scoped` requires a valid access token with the
-  `read:messages` permission.
+The sample `/api/public`, `/api/private`, `/api/private-scoped`, and `/api/me`
+routes have been removed. Patient routes now use `/patients/me/...` and derive
+the patient from the verified Auth0 identity. Physician routes use
+`/physicians/me/...`, and access to a patient's data requires an active
+patient-physician relationship. Health-data upload routes use
+`/health-data/me/...` and are restricted to the authenticated patient's own
+record. The former routes that accepted the caller's `user_id` are no longer
+registered.
 
-To configure the scoped endpoint, open **Applications > APIs** in the Auth0
-Dashboard, select the API matching `AUTH0_AUDIENCE`, and add the
-`read:messages` and `write:messages` permissions. The sample scoped endpoint
-requires `read:messages`. Use the API's **Test** tab to obtain an access token,
-then try these single-line requests:
+The `users` SQLAlchemy model expects nullable `auth0_issuer`,
+`auth0_subject`, and `last_used_at` columns. A unique constraint on
+`(auth0_issuer, auth0_subject)` identifies the one Auth0 identity linked to a
+MeSquared user while existing records can remain unlinked. The shared
+`get_current_user` dependency validates the token first, then resolves the
+verified issuer and subject to the internal `users.id`; unmapped identities
+receive 404. The model change does not alter a database. Add these columns and
+the unique constraint to the live schema before using this dependency against
+that database.
 
-```bash
-curl http://localhost:8000/api/public
-curl -X GET http://localhost:8000/api/private -H "authorization: Bearer YOUR_ACCESS_TOKEN"
-curl -X GET http://localhost:8000/api/private-scoped -H "authorization: Bearer YOUR_ACCESS_TOKEN"
-```
+`last_used_at` is modeled as a nullable timestamp but is not updated by the
+current-user lookup: an authenticated API request is not necessarily a login.
+Update it only when a trusted login/onboarding event is implemented.
 
-In the existing backend, only these Auth0 example routes are protected. The
-existing patient, physician, and health-data routes retain their prior access
-behavior.
+The database schema must include these Auth0 columns before protected
+user-specific routes can resolve a MeSquared account. The application does not
+create or migrate these columns at startup.

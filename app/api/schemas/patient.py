@@ -9,7 +9,6 @@ class UserRead(BaseModel):
     email: str
     first_name: str
     last_name: str
-    username: str
     
     model_config = ConfigDict(from_attributes=True)
 

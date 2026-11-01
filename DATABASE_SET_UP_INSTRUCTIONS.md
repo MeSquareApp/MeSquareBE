@@ -14,8 +14,15 @@ Whenever you create new tables or modify existing ones in the `app/models/` dire
 
 **Step 1: Activate the virtual environment**
 Ensure you are operating inside the isolated project environment to access the correct dependencies.
+
+Linux/macOS
 ```bash
 source .venv/bin/activate
+```
+
+Windows
+```bash
+source .venv/Scripts/activate
 ```
 
 **Step 2: Generate a new migration script**
