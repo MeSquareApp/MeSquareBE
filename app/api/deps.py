@@ -8,12 +8,12 @@ from app.core.security import verify_auth0_token
 from app.models.users import Patient, Physician, RoleEnum, User
 
 
-async def get_current_user(
-    token_payload: dict[str, object] = Depends(verify_auth0_token),
-    db: AsyncSession = Depends(get_db),
-) -> User:
+def verified_identity(token_payload: dict[str, object]) -> tuple[str, str]:
     """
-    Resolve the verified Auth0 issuer and subject to a MeSquared user record.
+    Validate the token claims and return the verified Auth0 (issuer, subject).
+
+    The issuer must match the configured Auth0 tenant; these values are the
+    only trusted source for linking a MeSquared account to an Auth0 identity.
     """
     subject = token_payload.get("sub")
     issuer = token_payload.get("iss")
@@ -30,6 +30,18 @@ async def get_current_user(
             detail="Invalid authentication credentials.",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    return issuer, subject
+
+
+async def get_current_user(
+    token_payload: dict[str, object] = Depends(verify_auth0_token),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """
+    Resolve the verified Auth0 issuer and subject to a MeSquared user record.
+    """
+    issuer, subject = verified_identity(token_payload)
 
     statement = select(User).where(
         User.auth0_issuer == issuer,
