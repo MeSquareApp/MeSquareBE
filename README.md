@@ -3,11 +3,11 @@
 Create file called ".env"
 
 Paste into file:
-``` m
-DATABASE_URL=
+```
+DATABASE_URL=postgresql+asyncpg://postgres.wamrrpwykkcuowdyewxd:mequare2026@aws-0-us-east-2.pooler.supabase.com:5432/postgres?ssl=require
 LLAMA_CLOUD_API_KEY='your-key'
-AUTH0_DOMAIN=
-AUTH0_AUDIENCE=
+AUTH0_DOMAIN=dev-tk23yhyc2e62i1a5.us.auth0.com
+AUTH0_AUDIENCE=https://mesquared-api-endpoint
 ```
 # MeSquareBE
 
@@ -50,39 +50,17 @@ the tenant's JWKS endpoint and verifies the signature, RS256 algorithm,
 configured audience, and issuer before returning claims. Missing or invalid
 tokens receive a generic 401 response.
 
-The sample `/api/public`, `/api/private`, `/api/private-scoped`, and `/api/me`
-routes have been removed. Patient routes now use `/patients/me/...` and derive
-the patient from the verified Auth0 identity. Physician routes use
-`/physicians/me/...`, and access to a patient's data requires an active
-patient-physician relationship. Health-data upload routes use
-`/health-data/me/...` and are restricted to the authenticated patient's own
-record. The former routes that accepted the caller's `user_id` are no longer
-registered.
-
-The `users` SQLAlchemy model expects non-nullable `auth0_issuer` and
-`auth0_subject` columns plus a nullable `last_used_at` column. A unique
-constraint on `(auth0_issuer, auth0_subject)` identifies the one Auth0 identity
-linked to a MeSquared user; every user must have a linked identity because
-authentication is Auth0-only. The shared `get_current_user` dependency validates
-the token first, then resolves the verified issuer and subject to the internal
-`users.id`; unmapped identities receive 404. The Alembic migration
-`36043d5dc19e` adds these columns, drops the legacy `username` column, and
-removes pre-Auth0 users (they cannot authenticate once JWT validation is
-enforced).
-
-`last_used_at` is modeled as a nullable timestamp but is not updated by the
-current-user lookup: an authenticated API request is not necessarily a login.
-It is set once, at onboarding.
-
-`POST /users/me/onboarding` self-registers the authenticated Auth0 identity as
-a MeSquared user. The request body carries the profile fields plus a `role`
-(`patient`, `physician`, or `admin`) and the role-specific fields, and the
-issuer/subject always come from the verified token — never from the body. The
-endpoint creates the `users` row and the role-specific row (`patients`,
-`physicians`, or `admins`) in one transaction, returns 201 with the new user,
-and 409 when the Auth0 identity or email is already registered. For now every
-role may self-register; role-gating for physicians and admins will be added
-later.
+`POST /users/me/create-m2-account` creates only the authenticated user's `users` row.
+The request body contains `first_name`, `last_name`, and a selected `role`
+(`patient`, `physician`, or `admin`). The API takes the issuer and subject from
+the verified token, email from a verified Auth0 access-token claim, and
+generates the UUID in the ORM. It sets `created_at` and `last_used_at` to the
+same time. Existing identities or emails return 409. It does not create a
+patient, physician, or admin profile; endpoints requiring those profiles will
+remain unavailable until those profile rows are created separately. Admin
+self-registration is rejected by the API even though the form displays the
+current role choices; admin accounts must be provisioned through a trusted
+administrative process.
 
 Every data-touching endpoint requires an `Authorization: Bearer <token>`
 header and resolves the caller through the `verify_auth0_token` →
@@ -92,6 +70,13 @@ the `/` root, and the auto-generated API docs (`/docs`, `/redoc`,
 `/openapi.json`) are intentionally left public because they expose no user
 data.
 
-The database schema must include these Auth0 columns before protected
-user-specific routes can resolve a MeSquared account. The application does not
-create or migrate these columns at startup.
+## Note on Testing Protected API on the Docs
+
+If you want to test any API that is protected by needing a bearer token,
+you need to first login/create an account through the front end. After
+that, once you're on dashboard logged in you can press Ctrl + Shift + I
+to get into the Dev Tools. Once you're in the Dev Tools, Navigate to 
+Application > Storage > Local storage > and check the second key. From 
+there check the value/body and look for access_token. Copy that w/o the
+"" and paste into the Authorize field in the FastAPI docs. Now you're 
+good to go for testing.

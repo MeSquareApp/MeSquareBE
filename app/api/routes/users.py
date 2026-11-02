@@ -1,54 +1,65 @@
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import verified_identity
-from app.api.schemas.user import OnboardedUserResponse, OnboardingRequest
+from app.api.deps import get_current_user, verified_identity
+from app.api.schemas.user import OnboardedUserResponse, OnboardingRequest, UserRead
 from app.core.db import get_db
 from app.core.security import verify_auth0_token
-from app.models.users import Admin, Patient, Physician, RoleEnum, User
+from app.models.users import RoleEnum, User
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-
-def _role_profile(user: User, payload: OnboardingRequest) -> object:
-    """Build the role-specific row linked to the new user."""
-    if payload.role == RoleEnum.patient:
-        return Patient(
-            user=user,
-            date_of_birth=payload.date_of_birth,
-            biological_sex=payload.biological_sex,
-            baseline_height_cm=payload.baseline_height_cm,
-            baseline_weight_kg=payload.baseline_weight_kg,
-            allergies=payload.allergies,
-            medical_conditions=payload.medical_conditions,
-        )
-    if payload.role == RoleEnum.physician:
-        return Physician(
-            user=user,
-            medical_license_number=payload.medical_license_number,
-            specialty=payload.specialty,
-        )
-    return Admin(user=user, access_level=payload.access_level)
+AUTH0_EMAIL_CLAIM = "https://mesquared.app/claims/email"
+AUTH0_EMAIL_VERIFIED_CLAIM = "https://mesquared.app/claims/email_verified"
 
 
-@router.post("/me/onboarding", status_code=status.HTTP_201_CREATED, response_model=OnboardedUserResponse)
-async def onboard_current_user(
+@router.get("/me", response_model=UserRead)
+async def get_me(user: User = Depends(get_current_user)) -> User:
+    """Return the authenticated user's MeSquared database record."""
+    return user
+
+
+@router.post(
+    "/me/create-m2-account",
+    status_code=status.HTTP_201_CREATED,
+    response_model=OnboardedUserResponse,
+)
+async def create_m2_account(
     payload: OnboardingRequest,
     token_payload: dict[str, object] = Depends(verify_auth0_token),
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """
-    Self-register the authenticated Auth0 identity as a MeSquared user.
+    Create the core MeSquared user row for the authenticated Auth0 identity.
 
     The Auth0 issuer and subject are taken from the verified token, never from
-    the request body. For now every role may self-register; role-gating for
-    physicians and admins will be added later.
+    the request body. The email is taken from signed Auth0 access-token claims.
+    Role-specific profiles are created separately after onboarding.
     """
     issuer, subject = verified_identity(token_payload)
+    email_claim = token_payload.get(AUTH0_EMAIL_CLAIM)
+    email_verified = token_payload.get(AUTH0_EMAIL_VERIFIED_CLAIM)
+    if (
+        not isinstance(email_claim, str)
+        or not email_claim.strip()
+        or email_verified is not True
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A verified Auth0 email is required to create an account.",
+        )
+    email = email_claim.strip().lower()
+
+    if payload.role == RoleEnum.admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin accounts cannot be self-registered.",
+        )
 
     existing_identity = await db.execute(
         select(User).where(
@@ -62,30 +73,33 @@ async def onboard_current_user(
             detail="This Auth0 identity is already linked to a MeSquared account.",
         )
 
-    existing_email = await db.execute(select(User).where(User.email == payload.email))
+    existing_email = await db.execute(
+        select(User).where(func.lower(User.email) == email)
+    )
     if existing_email.scalar_one_or_none() is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A MeSquared account with this email already exists.",
         )
 
+    created_at = datetime.now(timezone.utc)
     user = User(
-        email=payload.email,
+        id=uuid.uuid4(),
+        email=email,
         first_name=payload.first_name,
         last_name=payload.last_name,
         role=payload.role,
         auth0_issuer=issuer,
         auth0_subject=subject,
-        # Onboarding is a trusted event, so it counts as the first use.
-        last_used_at=datetime.now(timezone.utc),
+        created_at=created_at,
+        last_used_at=created_at,
     )
     db.add(user)
-    db.add(_role_profile(user, payload))
 
     try:
         await db.commit()
     except IntegrityError:
-        # Concurrent onboarding raced us for the identity, email, or license.
+        # Concurrent onboarding raced us for the identity or email.
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

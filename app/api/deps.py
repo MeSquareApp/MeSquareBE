@@ -58,7 +58,7 @@ async def get_current_user(
 
     return user
 
-
+# Todo: Verify get_current_patient works
 async def get_current_patient(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -79,6 +79,7 @@ async def get_current_patient(
     return patient
 
 
+# Todo: Verify get_current_physician works
 async def get_current_physician(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),

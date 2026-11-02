@@ -1,50 +1,39 @@
 import uuid
-from datetime import date, datetime
-from typing import Annotated, Literal, Union
+from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.api.schemas.patient import UserRead
 from app.models.users import RoleEnum
 
 
-class _OnboardingBase(BaseModel):
+class UserRead(BaseModel):
+    id: uuid.UUID
     email: str
     first_name: str
     last_name: str
+    role: RoleEnum
+    created_at: datetime
+    auth0_issuer: str
+    auth0_subject: str
+    last_used_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
-class PatientOnboarding(_OnboardingBase):
-    """Self-registration payload for a patient account."""
+class OnboardingRequest(BaseModel):
+    first_name: str = Field(min_length=1, max_length=255)
+    last_name: str = Field(min_length=1, max_length=255)
+    role: RoleEnum
 
-    role: Literal[RoleEnum.patient] = RoleEnum.patient
-    date_of_birth: date
-    biological_sex: str
-    baseline_height_cm: float = Field(ge=0)
-    baseline_weight_kg: float = Field(ge=0)
-    allergies: str = ""
-    medical_conditions: str = ""
+    model_config = ConfigDict(extra="forbid")
 
-
-class PhysicianOnboarding(_OnboardingBase):
-    """Self-registration payload for a physician account."""
-
-    role: Literal[RoleEnum.physician] = RoleEnum.physician
-    medical_license_number: str
-    specialty: str
-
-
-class AdminOnboarding(_OnboardingBase):
-    """Self-registration payload for an admin account."""
-
-    role: Literal[RoleEnum.admin] = RoleEnum.admin
-    access_level: str
-
-
-OnboardingRequest = Annotated[
-    Union[PatientOnboarding, PhysicianOnboarding, AdminOnboarding],
-    Field(discriminator="role"),
-]
+    @field_validator("first_name", "last_name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Name must not be blank.")
+        return normalized
 
 
 class OnboardedUserResponse(UserRead):

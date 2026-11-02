@@ -1,20 +1,28 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
-from app.api.routes.users import onboard_current_user
-from app.api.schemas.user import PatientOnboarding, PhysicianOnboarding
+from app.api.routes.users import (
+    AUTH0_EMAIL_CLAIM,
+    AUTH0_EMAIL_VERIFIED_CLAIM,
+    create_m2_account,
+    get_me,
+)
+from app.api.schemas.user import OnboardingRequest
 from app.core.config import settings
-from app.models.users import Patient, Physician, RoleEnum, User
+from app.models.users import RoleEnum, User
 
 
 def _claims() -> dict[str, object]:
     return {
         "iss": f"https://{settings.auth0_domain}/",
         "sub": "auth0|new-user",
+        AUTH0_EMAIL_CLAIM: " New.Patient@Example.com ",
+        AUTH0_EMAIL_VERIFIED_CLAIM: True,
     }
 
 
@@ -36,60 +44,49 @@ def _db(execute_results: list) -> SimpleNamespace:
     )
 
 
-def _patient_payload() -> PatientOnboarding:
-    return PatientOnboarding(
-        email="new.patient@example.com",
+def _payload(role: RoleEnum = RoleEnum.patient) -> OnboardingRequest:
+    return OnboardingRequest(
         first_name="New",
         last_name="Patient",
-        date_of_birth="1990-01-01",
-        biological_sex="female",
-        baseline_height_cm=170,
-        baseline_weight_kg=65,
+        role=role,
     )
 
 
 class OnboardingRouteTests(unittest.IsolatedAsyncioTestCase):
-    async def test_creates_patient_account_from_verified_identity(self):
+    async def test_get_me_returns_the_authenticated_database_user(self):
+        user = SimpleNamespace(
+            id=UUID("3f5150ea-0c80-4b79-bc27-e261f1702dca"),
+            email="user@example.com",
+            first_name="Database",
+            last_name="User",
+        )
+
+        result = await get_me(user)
+
+        self.assertIs(result, user)
+
+    async def test_creates_only_user_from_verified_identity(self):
         db = _db([None, None])
 
-        user = await onboard_current_user(_patient_payload(), _claims(), db)
+        user = await create_m2_account(_payload(), _claims(), db)
 
         self.assertEqual(user.email, "new.patient@example.com")
+        self.assertIsInstance(user.id, UUID)
+        self.assertEqual(user.first_name, "New")
+        self.assertEqual(user.last_name, "Patient")
         self.assertEqual(user.role, RoleEnum.patient)
         self.assertEqual(user.auth0_issuer, f"https://{settings.auth0_domain}/")
         self.assertEqual(user.auth0_subject, "auth0|new-user")
-        self.assertIsNotNone(user.last_used_at)
-
-        added_user, added_patient = (call.args[0] for call in db.add.call_args_list)
-        self.assertIsInstance(added_user, User)
-        self.assertIsInstance(added_patient, Patient)
-        self.assertIs(added_patient.user, added_user)
-        self.assertEqual(added_patient.date_of_birth.isoformat(), "1990-01-01")
+        self.assertEqual(user.created_at, user.last_used_at)
+        db.add.assert_called_once_with(user)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(user)
-
-    async def test_creates_physician_account(self):
-        db = _db([None, None])
-        payload = PhysicianOnboarding(
-            email="new.physician@example.com",
-            first_name="New",
-            last_name="Physician",
-            medical_license_number="LIC-123",
-            specialty="Cardiology",
-        )
-
-        user = await onboard_current_user(payload, _claims(), db)
-
-        self.assertEqual(user.role, RoleEnum.physician)
-        _, added_physician = (call.args[0] for call in db.add.call_args_list)
-        self.assertIsInstance(added_physician, Physician)
-        self.assertEqual(added_physician.medical_license_number, "LIC-123")
 
     async def test_returns_conflict_when_identity_already_linked(self):
         db = _db([SimpleNamespace(id="existing-user"), None])
 
         with self.assertRaises(HTTPException) as raised:
-            await onboard_current_user(_patient_payload(), _claims(), db)
+            await create_m2_account(_payload(), _claims(), db)
 
         self.assertEqual(raised.exception.status_code, 409)
         db.add.assert_not_called()
@@ -99,17 +96,36 @@ class OnboardingRouteTests(unittest.IsolatedAsyncioTestCase):
         db = _db([None, SimpleNamespace(id="existing-user")])
 
         with self.assertRaises(HTTPException) as raised:
-            await onboard_current_user(_patient_payload(), _claims(), db)
+            await create_m2_account(_payload(), _claims(), db)
 
         self.assertEqual(raised.exception.status_code, 409)
         db.add.assert_not_called()
+
+    async def test_rejects_missing_or_unverified_auth0_email(self):
+        invalid_claims = [
+            {**_claims(), AUTH0_EMAIL_VERIFIED_CLAIM: False},
+            {key: value for key, value in _claims().items() if key != AUTH0_EMAIL_CLAIM},
+        ]
+        for claims in invalid_claims:
+            db = _db([])
+            with self.subTest(claims=claims), self.assertRaises(HTTPException) as raised:
+                await create_m2_account(_payload(), claims, db)
+            self.assertEqual(raised.exception.status_code, 403)
+            db.execute.assert_not_awaited()
+
+    async def test_admin_role_cannot_be_self_registered(self):
+        db = _db([])
+        with self.assertRaises(HTTPException) as raised:
+            await create_m2_account(_payload(RoleEnum.admin), _claims(), db)
+        self.assertEqual(raised.exception.status_code, 403)
+        db.execute.assert_not_awaited()
 
     async def test_rejects_claims_with_unexpected_issuer(self):
         db = _db([])
         claims = {"iss": "https://unexpected.example/", "sub": "auth0|new-user"}
 
         with self.assertRaises(HTTPException) as raised:
-            await onboard_current_user(_patient_payload(), claims, db)
+            await create_m2_account(_payload(), claims, db)
 
         self.assertEqual(raised.exception.status_code, 401)
         db.execute.assert_not_awaited()
@@ -119,7 +135,7 @@ class OnboardingRouteTests(unittest.IsolatedAsyncioTestCase):
         db.commit = AsyncMock(side_effect=IntegrityError("stmt", "params", Exception()))
 
         with self.assertRaises(HTTPException) as raised:
-            await onboard_current_user(_patient_payload(), _claims(), db)
+            await create_m2_account(_payload(), _claims(), db)
 
         self.assertEqual(raised.exception.status_code, 409)
         db.rollback.assert_awaited_once()

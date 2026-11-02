@@ -1,3 +1,5 @@
+## Test if Patients route works when we get data in db
+
 from typing import List
 from uuid import UUID
 
