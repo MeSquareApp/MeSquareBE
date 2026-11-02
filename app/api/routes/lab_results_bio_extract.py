@@ -3,15 +3,14 @@ import logging
 import os
 import tempfile
 import time
-import uuid
 from datetime import datetime, timezone
 from typing import List
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from llama_cloud import AsyncLlamaCloud
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_patient
 from app.core.config import settings
 from app.core.db import get_db
 from app.api.schemas.file_extract_schema import BiomarkerExtraction, biomarker_extraction_schema
@@ -52,17 +51,17 @@ BIOMARKER_UNITS = {
 }
 
 
-@router.post("/{user_id}/extract-biomarkers-from-lab-results", response_model=List[BiomarkerLogResponse])
+@router.post("/me/extract-biomarkers-from-lab-results", response_model=List[BiomarkerLogResponse])
 async def extract_biomarkers_from_file(
-    user_id: uuid.UUID,
     file: UploadFile = File(
         ...,
         description="A blood test lab results document (PDF, JPEG, PNG, or TXT) to extract biomarkers from",
     ),
+    patient: Patient = Depends(get_current_patient),
     db: AsyncSession = Depends(get_db),
 ) -> List[BiomarkerLogResponse]:
     """
-    [DEV ONLY] Extract biomarkers from an uploaded lab results document for a patient,
+    Extract biomarkers from an uploaded lab results document for the authenticated patient,
     persist them as raw biomarker logs, and return the saved logs.
     """
     if file.content_type not in ALLOWED_CONTENT_TYPES:
@@ -70,11 +69,6 @@ async def extract_biomarkers_from_file(
             status_code=415,
             detail="Unsupported file type. Please upload a PDF, JPEG, PNG, or TXT file.",
         )
-
-    # Fail fast if the patient does not exist, before spending LlamaCloud credits.
-    result = await db.execute(select(Patient.user_id).where(Patient.user_id == user_id))
-    if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Patient not found.")
 
     # Read the upload with a size cap so oversized files never fully load into memory.
     file_bytes = await file.read(MAX_FILE_SIZE + 1)
@@ -149,7 +143,7 @@ async def extract_biomarkers_from_file(
         measured_at = datetime.now(timezone.utc)
         logs = [
             RawBiomarkerLog(
-                patient_id=user_id,
+                patient_id=patient.user_id,
                 biomarker_abbr=abbr,
                 value=value,
                 unit=BIOMARKER_UNITS[abbr],
@@ -160,7 +154,7 @@ async def extract_biomarkers_from_file(
         ]
         db.add_all(logs)
         await db.commit()
-        logger.info("Saved %d biomarker logs for patient %s", len(logs), user_id)
+        logger.info("Saved %d biomarker logs for patient %s", len(logs), patient.user_id)
 
         return logs
 

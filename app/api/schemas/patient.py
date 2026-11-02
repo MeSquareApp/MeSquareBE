@@ -1,17 +1,9 @@
-import uuid
 from datetime import date, datetime
+import uuid
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Optional
 
-# Base User Schema
-class UserRead(BaseModel):
-    id: uuid.UUID
-    email: str
-    first_name: str
-    last_name: str
-    username: str
-    
-    model_config = ConfigDict(from_attributes=True)
+from app.api.schemas.user import UserRead
 
 # Patient Schemas
 class PatientUpdate(BaseModel):

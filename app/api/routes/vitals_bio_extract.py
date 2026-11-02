@@ -3,14 +3,13 @@ import logging
 import os
 import tempfile
 import time
-import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from llama_cloud import AsyncLlamaCloud
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_patient
 from app.core.config import settings
 from app.core.db import get_db
 from app.api.schemas.file_extract_schema import VitalsExtraction, vitals_extraction_schema
@@ -46,17 +45,17 @@ INCHES_TO_CM = 2.54
 POUNDS_TO_KG = 2.20462
 
 
-@router.post("/{user_id}/extract-vitals-from-visit-summary", response_model=VitalsLogResponse)
+@router.post("/me/extract-vitals-from-visit-summary", response_model=VitalsLogResponse)
 async def extract_vitals_from_visit_summary(
-    user_id: uuid.UUID,
     file: UploadFile = File(
         ...,
         description="A visit summary document (PDF, JPEG, PNG, or TXT) to extract vitals from",
     ),
+    patient: Patient = Depends(get_current_patient),
     db: AsyncSession = Depends(get_db),
 ) -> VitalsLogResponse:
     """
-    [DEV ONLY] Extract vitals such as height, weight and systolic blood pressure from an uploaded visit
+    Extract vitals such as height, weight and systolic blood pressure from an uploaded visit
     summary document for a patient, persist the systolic blood pressure as a raw biomarker log, update the
     patient's baseline height (cm) and weight (kg), and return the extracted vitals.
     """
@@ -65,12 +64,6 @@ async def extract_vitals_from_visit_summary(
             status_code=415,
             detail="Unsupported file type. Please upload a PDF, JPEG, PNG, or TXT file.",
         )
-
-    # Fail fast if the patient does not exist, before spending LlamaCloud credits.
-    # Fetch the full entity (not just the id) so we can update its baseline vitals below.
-    patient = (await db.execute(select(Patient).where(Patient.user_id == user_id))).scalar_one_or_none()
-    if patient is None:
-        raise HTTPException(status_code=404, detail="Patient not found.")
 
     # Read the upload with a size cap so oversized files never fully load into memory.
     file_bytes = await file.read(MAX_FILE_SIZE + 1)
@@ -147,7 +140,7 @@ async def extract_vitals_from_visit_summary(
         if extracted.systolic_bp is not None:
             db.add(
                 RawBiomarkerLog(
-                    patient_id=user_id,
+                    patient_id=patient.user_id,
                     biomarker_abbr="systolic_bp",
                     value=extracted.systolic_bp,
                     unit="mmHg",
@@ -168,7 +161,7 @@ async def extract_vitals_from_visit_summary(
         await db.commit()
         logger.info(
             "Saved vitals for patient %s (height_cm=%s, weight_kg=%s, systolic_bp=%s)",
-            user_id,
+            patient.user_id,
             height_cm,
             weight_kg,
             extracted.systolic_bp,

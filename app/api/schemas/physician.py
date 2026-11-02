@@ -3,8 +3,7 @@ from pydantic import BaseModel, ConfigDict
 from typing import List
 from app.api.schemas.patient import PatientProfileResponse, TwinResponse, BiomarkerLogResponse
 
-# Import the UserRead schema you already built for patients
-from app.api.schemas.patient import UserRead
+from app.api.schemas.user import UserRead
 
 class ClinicResponse(BaseModel):
     id: uuid.UUID
