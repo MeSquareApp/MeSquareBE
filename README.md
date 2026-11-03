@@ -4,7 +4,7 @@ Create file called ".env"
 
 Paste into file:
 ```
-DATABASE_URL=postgresql+asyncpg://postgres.wamrrpwykkcuowdyewxd:mequare2026@aws-0-us-east-2.pooler.supabase.com:5432/postgres?ssl=require
+DATABASE_URL=
 LLAMA_CLOUD_API_KEY='your-key'
 AUTH0_DOMAIN=dev-tk23yhyc2e62i1a5.us.auth0.com
 AUTH0_AUDIENCE=https://mesquared-api-endpoint
