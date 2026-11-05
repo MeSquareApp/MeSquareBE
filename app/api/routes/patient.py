@@ -3,8 +3,9 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -58,7 +59,15 @@ async def update_patient_profile(
     for key, value in profile_update.model_dump(exclude_unset=True).items():
         setattr(profile, key, value)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # Defensive: constraint violation on update (e.g. concurrent modification).
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Profile update failed.",
+        )
     await db.refresh(profile)
     return profile
 

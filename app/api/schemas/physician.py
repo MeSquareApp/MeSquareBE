@@ -1,6 +1,6 @@
 import uuid
-from pydantic import BaseModel, ConfigDict
-from typing import List
+from pydantic import BaseModel, ConfigDict, Field
+from typing import List, Optional
 from app.api.schemas.patient import PatientProfileResponse, TwinResponse, BiomarkerLogResponse
 
 from app.api.schemas.user import UserRead
@@ -15,6 +15,16 @@ class ClinicResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class PhysicianUpdate(BaseModel):
+    """Partial update of the physician profile; only provided fields are applied.
+
+    Used by the onboarding form to fill in the license and specialty that
+    were not collected at account creation.
+    """
+
+    medical_license_number: Optional[str] = Field(None, min_length=1, max_length=255)
+    specialty: Optional[str] = Field(None, min_length=1, max_length=255)
+
 class PhysicianClinicResponse(BaseModel):
     # This maps to the junction table which holds the actual Clinic object
     clinic: ClinicResponse
@@ -22,8 +32,14 @@ class PhysicianClinicResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 class PhysicianProfileResponse(BaseModel):
-    medical_license_number: str
-    specialty: str
+    """Physician profile as stored in the database.
+
+    The row is created (empty) at account creation, so license and
+    specialty are null until the physician completes onboarding.
+    """
+
+    medical_license_number: Optional[str] = None
+    specialty: Optional[str] = None
     user: UserRead
     clinics: List[PhysicianClinicResponse]
 

@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import date, datetime
-from sqlalchemy import String, ForeignKey, DateTime, Enum, UniqueConstraint, func
+from sqlalchemy import ARRAY, String, ForeignKey, DateTime, Enum, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
@@ -45,16 +45,39 @@ class User(Base):
 
 
 class Patient(Base):
-    """Patient-specific physiological constants."""
+    """Patient-specific physiological constants.
+
+    Only `date_of_birth` and `biological_sex` are collected at account
+    creation; every other column stays NULL until the patient completes
+    onboarding. NULL therefore means "not answered yet".
+    """
+
     __tablename__ = "patients"
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
     date_of_birth: Mapped[date] = mapped_column()
     biological_sex: Mapped[str] = mapped_column(String)
-    baseline_height_cm: Mapped[float] = mapped_column()
-    baseline_weight_kg: Mapped[float] = mapped_column()
-    allergies: Mapped[str] = mapped_column(String)
-    medical_conditions: Mapped[str] = mapped_column(String)
+    race: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    region: Mapped[str | None] = mapped_column(String, nullable=True)
+    diagnosed_conditions: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
+    other_condition: Mapped[str | None] = mapped_column(String, nullable=True)
+    current_medications: Mapped[str | None] = mapped_column(String, nullable=True)
+    blood_pressure_medication: Mapped[str | None] = mapped_column(String, nullable=True)
+    blood_pressure_details: Mapped[str | None] = mapped_column(String, nullable=True)
+    cholesterol_medication: Mapped[str | None] = mapped_column(String, nullable=True)
+    cholesterol_details: Mapped[str | None] = mapped_column(String, nullable=True)
+    alcohol: Mapped[str | None] = mapped_column(String, nullable=True)
+    smoking: Mapped[str | None] = mapped_column(String, nullable=True)
+    recreational_drugs: Mapped[str | None] = mapped_column(String, nullable=True)
+    exercise_hours: Mapped[str | None] = mapped_column(String, nullable=True)
+    sleep_hours: Mapped[str | None] = mapped_column(String, nullable=True)
+    high_blood_pressure_history: Mapped[str | None] = mapped_column(String, nullable=True)
+    high_cholesterol_history: Mapped[str | None] = mapped_column(String, nullable=True)
+    baseline_height_cm: Mapped[float | None] = mapped_column()
+    baseline_weight_kg: Mapped[float | None] = mapped_column()
+    waist_cm: Mapped[float | None] = mapped_column()
+    allergies: Mapped[str | None] = mapped_column(String, nullable=True)
+    medical_history: Mapped[str | None] = mapped_column(String, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="patient")
     twin: Mapped["Twin"] = relationship(back_populates="patient", uselist=False)
@@ -63,12 +86,18 @@ class Patient(Base):
 
 
 class Physician(Base):
-    """Physician-specific professional details."""
+    """Physician-specific professional details.
+
+    The row is created (empty) at account creation; license and specialty
+    are provided when the physician completes onboarding. NULL means
+    "not answered yet".
+    """
+
     __tablename__ = "physicians"
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
-    medical_license_number: Mapped[str] = mapped_column(String, unique=True)
-    specialty: Mapped[str] = mapped_column(String)
+    medical_license_number: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    specialty: Mapped[str | None] = mapped_column(String, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="physician")
     patients: Mapped[list["PatientPhysician"]] = relationship(back_populates="physician")
