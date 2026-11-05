@@ -18,6 +18,14 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _column_exists(table_name: str, column_name: str) -> bool:
+    """Check the live schema: the imperial helper columns were drift on the
+    original development database and are not created by the migration chain,
+    so they may or may not be present depending on the database's history."""
+    inspector = sa.inspect(op.get_bind())
+    return any(c["name"] == column_name for c in inspector.get_columns(table_name))
+
+
 def upgrade() -> None:
     # The model now stores metric baselines: rename the imperial columns...
     op.alter_column("patients", "baseline_height_ft", new_column_name="baseline_height_cm")
@@ -34,14 +42,16 @@ def upgrade() -> None:
 
     # ...and convert the existing data. Height was stored as feet (baseline_height_ft)
     # plus an inches remainder (baseline_height_in, e.g. 6 ft + 1 in); weight in pounds.
-    op.execute(
-        "UPDATE patients SET baseline_height_cm = (baseline_height_cm * 12 + baseline_height_in) * 2.54"
-    )
+    # The inches/age helper columns only ever existed through schema drift on the
+    # development database, so convert/drop them only when present.
+    if _column_exists("patients", "baseline_height_in"):
+        op.execute(
+            "UPDATE patients SET baseline_height_cm = (baseline_height_cm * 12 + baseline_height_in) * 2.54"
+        )
+        op.drop_column("patients", "baseline_height_in")
     op.execute("UPDATE patients SET baseline_weight_kg = baseline_weight_kg / 2.20462")
-
-    # Drop the leftover imperial helper columns that no longer exist on the model.
-    op.drop_column("patients", "baseline_height_in")
-    op.drop_column("patients", "baseline_age")
+    if _column_exists("patients", "baseline_age"):
+        op.drop_column("patients", "baseline_age")
 
 
 def downgrade() -> None:
