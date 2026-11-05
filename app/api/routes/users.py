@@ -10,7 +10,7 @@ from app.api.deps import get_current_user, verified_identity
 from app.api.schemas.user import OnboardedUserResponse, OnboardingRequest, UserRead
 from app.core.db import get_db
 from app.core.security import verify_auth0_token
-from app.models.users import RoleEnum, User
+from app.models.users import Patient, Physician, RoleEnum, User
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -35,11 +35,14 @@ async def create_m2_account(
     db: AsyncSession = Depends(get_db),
 ) -> User:
     """
-    Create the core MeSquared user row for the authenticated Auth0 identity.
+    Create the core MeSquared user row plus the role-specific profile row.
 
     The Auth0 issuer and subject are taken from the verified token, never from
     the request body. The email is taken from signed Auth0 access-token claims.
-    Role-specific profiles are created separately after onboarding.
+    For patients, the row is seeded with the dob and sex provided at signup;
+    the remaining attributes stay NULL until the patient completes the
+    onboarding form. For physicians, the row is created empty and completed
+    the same way. Both rows are inserted in a single transaction.
     """
     issuer, subject = verified_identity(token_payload)
     email_claim = token_payload.get(AUTH0_EMAIL_CLAIM)
@@ -95,6 +98,17 @@ async def create_m2_account(
         last_used_at=created_at,
     )
     db.add(user)
+
+    if payload.role == RoleEnum.patient:
+        db.add(
+            Patient(
+                user_id=user.id,
+                date_of_birth=payload.dob,
+                biological_sex=payload.sex.strip() if payload.sex else None,
+            )
+        )
+    elif payload.role == RoleEnum.physician:
+        db.add(Physician(user_id=user.id))
 
     try:
         await db.commit()
