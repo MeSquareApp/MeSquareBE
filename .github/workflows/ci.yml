@@ -1,0 +1,84 @@
+name: CI
+
+# Run the test suite (and validate the Docker image builds) on pushes and
+# pull requests targeting the main and develop branches.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Run integration tests
+    runs-on: ubuntu-latest
+
+    # The tests are HTTP-level integration tests that need a real PostgreSQL
+    # server (tests/conftest.py creates a *_test database on it and runs the
+    # full Alembic migration chain). Supabase is not used in CI; this
+    # throwaway service container plays that role instead.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Environment variables take precedence over .env (pydantic-settings),
+      # so this redirects the whole app + tests at the service container.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+      # Settings() requires these to be present, but the tests fake Auth0
+      # (verify_auth0_token is overridden) and never call LlamaCloud, so
+      # placeholder values are sufficient. Replace with secrets if you ever
+      # add tests that exercise the real services.
+      LLAMA_CLOUD_API_KEY: ${{ secrets.LLAMA_CLOUD_API_KEY || 'ci-placeholder' }}
+      AUTH0_DOMAIN: ${{ secrets.AUTH0_DOMAIN || 'ci-placeholder.auth0.com' }}
+      AUTH0_AUDIENCE: ${{ secrets.AUTH0_AUDIENCE || 'https://ci-placeholder/' }}
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: "Install dependencies (incl. dev: pytest, alembic)"
+        run: uv sync --locked --dev
+
+      - name: Run the test suite
+        run: uv run pytest -v
+
+  docker:
+    name: Validate Docker image builds
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the production image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: mesquarebe:ci
+          # To publish (e.g. to GitHub Container Registry), add:
+          #   - a login step: docker/login-action@v3 with
+          #     registry: ghcr.io, username: ${{ github.actor }},
+          #     password: ${{ secrets.GITHUB_TOKEN }}
+          #   - change push to true and set tags to
+          #     ghcr.io/${{ github.repository }}:latest

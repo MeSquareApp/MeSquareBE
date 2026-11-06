@@ -11,13 +11,15 @@ AUTH0_AUDIENCE=https://mesquared-api-endpoint
 ```
 # MeSquareBE
 
-Run 
-```bash
-uv add uvicorn
-```
 Start your Docker app, then run this command:
 ```bash
 docker compose up --build
+```
+
+## Check health status
+Run this in another terminal
+```bash
+docker compose ps          # should show "healthy"
 ```
 
 If you want to run app locally with no docker, just run these 2 commands
@@ -26,9 +28,7 @@ uv sync
 uv run fastapi dev
 ```
 
-Once app runs, go to this link: http://localhost:8000/
-
-For documentation, go to this link: http://localhost:8000/docs
+For documentation, once app runs, go to this link: http://localhost:8000/docs
 
 ## Auth0 API authentication
 

@@ -15,3 +15,13 @@ services:
       - 8000:8000
     env_file:
       - .env
+    # The /health endpoint executes a `SELECT 1` against the database, so this
+    # healthcheck verifies both the app process and DB connectivity.
+    # Uses Python stdlib (urllib) because the runtime image is minimal and
+    # does not ship curl or wget.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
