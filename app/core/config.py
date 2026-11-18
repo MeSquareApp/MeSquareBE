@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     auth0_domain: str = Field(validation_alias="AUTH0_DOMAIN")
     auth0_audience: str = Field(validation_alias="AUTH0_AUDIENCE")
     auth0_algorithms: list[str] = ["RS256"]
+    ml_engine_url: str = Field(validation_alias="ML_ENGINE_URL")
 
     model_config = SettingsConfigDict(
         env_file=".env",
