@@ -7,6 +7,16 @@ class Settings(BaseSettings):
     auth0_domain: str = Field(validation_alias="AUTH0_DOMAIN")
     auth0_audience: str = Field(validation_alias="AUTH0_AUDIENCE")
     auth0_algorithms: list[str] = ["RS256"]
+    # MeSquareAssistantBot streaming endpoint. Points at the local bot in
+    # development; set ASSISTANT_BOT_URL in the deployed environments.
+    assistant_bot_url: str = Field(
+        default="http://localhost:8001/chat/stream",
+        validation_alias="ASSISTANT_BOT_URL",
+    )
+    assistant_bot_api_key: str | None = Field(
+        default=None,
+        validation_alias="ASSISTANT_BOT_API_KEY",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

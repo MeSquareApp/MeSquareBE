@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.models.health import Twin, RawBiomarkerLog
     from app.models.associations import PatientPhysician, PhysicianClinic
+    from app.models.chat import Conversation
 
 class RoleEnum(str, enum.Enum):
     patient = "patient"
@@ -42,6 +43,7 @@ class User(Base):
     patient: Mapped["Patient"] = relationship(back_populates="user", uselist=False)
     physician: Mapped["Physician"] = relationship(back_populates="user", uselist=False)
     admin: Mapped["Admin"] = relationship(back_populates="user", uselist=False)
+    conversations: Mapped[list["Conversation"]] = relationship(back_populates="user")
 
 
 class Patient(Base):

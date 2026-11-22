@@ -11,7 +11,7 @@ from alembic import context
 from app.core.config import settings
 from app.models.base import Base
 # Import all model files so Alembic can inspect them for autogeneration
-from app.models import users, clinics, health, associations 
+from app.models import users, clinics, health, associations, chat
 # -----------------------------------------------------------------
 
 
