@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     auth0_audience: str = Field(validation_alias="AUTH0_AUDIENCE")
     auth0_algorithms: list[str] = ["RS256"]
     ml_engine_url: str = Field(validation_alias="ML_ENGINE_URL")
+    # Seconds to wait on the ML Engine before giving up on a twin computation.
+    ml_engine_timeout_seconds: float = Field(
+        default=30.0, validation_alias="ML_ENGINE_TIMEOUT_SECONDS"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

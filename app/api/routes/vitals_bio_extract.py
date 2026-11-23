@@ -5,7 +5,7 @@ import tempfile
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException
 from llama_cloud import AsyncLlamaCloud
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,7 @@ from app.api.schemas.file_extract_schema import VitalsExtraction, vitals_extract
 from app.api.schemas.patient import VitalsLogResponse
 from app.models.health import RawBiomarkerLog
 from app.models.users import Patient
+from app.services.twin_service import recompute_twin_in_background
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ POUNDS_TO_KG = 2.20462
 
 @router.post("/me/extract-vitals-from-visit-summary", response_model=VitalsLogResponse)
 async def extract_vitals_from_visit_summary(
+    background: BackgroundTasks,
     file: UploadFile = File(
         ...,
         description="A visit summary document (PDF, JPEG, PNG, or TXT) to extract vitals from",
@@ -166,6 +168,9 @@ async def extract_vitals_from_visit_summary(
             weight_kg,
             extracted.systolic_bp,
         )
+
+        # New vitals change the forecast: recompute the twin after the response.
+        background.add_task(recompute_twin_in_background, patient.user_id)
 
         # Build the response from the local values: ORM objects may be expired after
         # commit, and re-reading them would trigger another lazy query.

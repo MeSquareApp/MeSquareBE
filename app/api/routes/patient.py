@@ -3,7 +3,7 @@
 from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,12 +15,18 @@ from app.api.schemas.patient import (
     LinkPhysicianRequest,
     PatientProfileResponse,
     PatientUpdate,
-    TwinResponse,
 )
+from app.api.schemas.twin import DigitalTwinStateResponse, TwinStateRead
 from app.core.db import get_db
 from app.models.associations import AccessStatusEnum, PatientPhysician
 from app.models.health import RawBiomarkerLog, Twin
 from app.models.users import Patient
+from app.services import twin_service
+from app.services.ml_engine_client import (
+    MLEngineResponseError,
+    MLEngineTimeout,
+    MLEngineUnavailable,
+)
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
 
@@ -72,19 +78,73 @@ async def update_patient_profile(
     return profile
 
 
-@router.get("/me/twin", response_model=TwinResponse)
+def _twin_to_read(twin: Twin) -> TwinStateRead:
+    """Shape a persisted Twin row into the typed read response."""
+    return TwinStateRead(
+        patient_id=str(twin.patient_id),
+        last_updated=twin.last_updated.isoformat() if twin.last_updated else None,
+        state=DigitalTwinStateResponse.model_validate(twin.t_zero_state),
+    )
+
+
+async def _sync_or_http(patient_id, db: AsyncSession) -> Twin:
+    """Run a twin sync, translating service/engine errors into HTTP errors."""
+    try:
+        return await twin_service.sync_patient_twin(patient_id, db)
+    except twin_service.PatientNotForecastable as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except twin_service.PatientNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except MLEngineTimeout as exc:
+        raise HTTPException(
+            status_code=504, detail="The forecasting service timed out."
+        ) from exc
+    except MLEngineUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The forecasting service is currently unavailable.",
+        ) from exc
+    except MLEngineResponseError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "The forecasting service returned an error "
+                f"(HTTP {exc.status_code})."
+            ),
+        ) from exc
+
+
+@router.get("/me/twin", response_model=TwinStateRead)
 async def get_patient_twin(
+    compute: bool = Query(
+        False,
+        description="Force a fresh recomputation even if a saved state exists.",
+    ),
     patient: Patient = Depends(get_current_patient),
     db: AsyncSession = Depends(get_db),
 ):
+    """Return the patient's digital twin state.
+
+    Reads the cached state when one exists. If none exists yet, or if
+    ``compute=true`` is passed, the state is computed and saved first.
+    """
     result = await db.execute(select(Twin).where(Twin.patient_id == patient.user_id))
     twin = result.scalar_one_or_none()
-    if twin is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Digital twin state not found for this patient.",
-        )
-    return twin
+
+    if twin is None or compute:
+        twin = await _sync_or_http(patient.user_id, db)
+
+    return _twin_to_read(twin)
+
+
+@router.post("/me/twin/sync", response_model=TwinStateRead)
+async def sync_patient_twin(
+    patient: Patient = Depends(get_current_patient),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recompute the patient's digital twin state and return the saved result."""
+    twin = await _sync_or_http(patient.user_id, db)
+    return _twin_to_read(twin)
 
 
 @router.get("/me/biomarkers", response_model=List[BiomarkerLogResponse])

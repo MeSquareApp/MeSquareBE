@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, UploadFile, File, HTTPException
 from llama_cloud import AsyncLlamaCloud
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ from app.api.schemas.file_extract_schema import BiomarkerExtraction, biomarker_e
 from app.api.schemas.patient import BiomarkerLogResponse
 from app.models.health import RawBiomarkerLog
 from app.models.users import Patient
+from app.services.twin_service import recompute_twin_in_background
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ BIOMARKER_UNITS = {
 
 @router.post("/me/extract-biomarkers-from-lab-results", response_model=List[BiomarkerLogResponse])
 async def extract_biomarkers_from_file(
+    background: BackgroundTasks,
     file: UploadFile = File(
         ...,
         description="A blood test lab results document (PDF, JPEG, PNG, or TXT) to extract biomarkers from",
@@ -155,6 +157,9 @@ async def extract_biomarkers_from_file(
         db.add_all(logs)
         await db.commit()
         logger.info("Saved %d biomarker logs for patient %s", len(logs), patient.user_id)
+
+        # New labs change the forecast: recompute the twin after the response.
+        background.add_task(recompute_twin_in_background, patient.user_id)
 
         return logs
 

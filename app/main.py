@@ -10,7 +10,6 @@ from app.api.routes.users import router as users_router  # Import the user onboa
 from app.api.routes.lab_results_bio_extract import router as extract_biomarkers_from_lab_results
 from app.api.routes.vitals_bio_extract import router as extract_vitals_from_visit_summary
 from app.core.db import engine
-from app.api.routes.forecast import router as forecast_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,7 +34,6 @@ app.include_router(physician_router)
 app.include_router(users_router)
 app.include_router(extract_biomarkers_from_lab_results)
 app.include_router(extract_vitals_from_visit_summary)
-app.include_router(forecast_router)
 
 
 @app.get("/")
