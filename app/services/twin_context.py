@@ -60,6 +60,19 @@ def _age_on(date_of_birth: date, today: date) -> int:
     )
 
 
+def _normalize_sex(biological_sex: str | None) -> str | None:
+    """Normalize biological_sex for MeSquareAssistantBot.
+
+    The bot validates sex as the case-sensitive Literal["male", "female"],
+    while patient onboarding stores e.g. "Female". Anything unrecognized is
+    sent as null (the bot tolerates a missing sex) rather than risking a 422.
+    """
+    if biological_sex is None:
+        return None
+    normalized = biological_sex.strip().lower()
+    return normalized if normalized in ("male", "female") else None
+
+
 async def _latest_lab_anchors(db: AsyncSession, patient_id) -> LabAnchors | None:
     """Latest measured value per recognized lab biomarker (one query)."""
     statement = (
@@ -165,7 +178,7 @@ async def build_digital_twin_context(db: AsyncSession, patient: Patient) -> Digi
     return DigitalTwinContext(
         user_id=str(patient.user_id),
         age=_age_on(patient.date_of_birth, today) if patient.date_of_birth else None,
-        sex=patient.biological_sex,
+        sex=_normalize_sex(patient.biological_sex),
         smoking_status=patient.smoking,
         lab_anchors=await _latest_lab_anchors(db, patient.user_id),
         wearables_summary=await _wearables_summary(db, patient.user_id),

@@ -19,22 +19,54 @@ class BotHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         payload = json.loads(self.rfile.read(length) or b"{}")
 
-        events = [("status", {"status": "generating"})]
-        events.append(("token", {"token": "Based on your twin context, "}))
-        events.append(("token", {"token": "your 14-day averages look stable."}))
-        events.append(
+        # Mirrors the real bot's SSE contract: token events, one citations
+        # event with a {"citations": [...]} wrapper, then done. Queries
+        # matching the guardrail patterns get the early-exit status + done.
+        events: list[tuple[str, dict]] = [
+            ("token", {"token": "Based on your twin context, "}),
+            ("token", {"token": "your 14-day averages look stable."}),
             (
-                "citation",
+                "citations",
                 {
-                    "guideline_source": "2023 ACC/AHA Multisociety Guideline",
-                    "section_reference": "Section 4.2",
-                    "excerpt": "Lifestyle changes are recommended first-line.",
+                    "citations": [
+                        {
+                            "chunk_id": "chunk-1",
+                            "guideline_title": "2023 ACC/AHA Multisociety Guideline",
+                            "section_title": "Section 4.2",
+                            "excerpt": "Lifestyle changes are recommended first-line.",
+                        }
+                    ]
                 },
-            )
-        )
-        if "aspirin" in payload.get("query", "").lower():
-            events.append(("status", {"status": "medication_prohibited"}))
-        events.append(("done", {"finish_reason": "stop"}))
+            ),
+        ]
+        query = payload.get("query", "").lower()
+        if "aspirin" in query or "lipitor" in query:
+            events = [
+                (
+                    "status",
+                    {
+                        "status": "medication_prohibited",
+                        "output_text": "I cannot provide medication advice.",
+                    },
+                ),
+                ("done", {"status": "medication_prohibited", "total_citations": 0}),
+            ]
+        elif any(
+            keyword in query
+            for keyword in ("chest pain", "short of breath", "heart attack", "stroke")
+        ):
+            events = [
+                (
+                    "status",
+                    {
+                        "status": "emergency",
+                        "output_text": "EMERGENCY NOTICE: Please call 911 immediately.",
+                    },
+                ),
+                ("done", {"status": "emergency", "total_citations": 0}),
+            ]
+        else:
+            events.append(("done", {"status": "success"}))
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")

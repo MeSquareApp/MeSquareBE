@@ -45,8 +45,10 @@ router = APIRouter(prefix="/api/v1/conversations", tags=["Chat"])
 HISTORY_LIMIT = 20
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
-# Bot status values that must be recorded in guardrail_events.
-GUARDRAIL_EVENT_TYPES = {"medication_prohibited", "off_topic"}
+# Bot status values that must be recorded in guardrail_events. MeSquareAssistantBot
+# emits these from its topic detector (emergency/off_topic), medication gate, and
+# verifier nodes.
+GUARDRAIL_EVENT_TYPES = {"medication_prohibited", "off_topic", "emergency"}
 
 
 async def _get_owned_conversation(
@@ -261,19 +263,54 @@ def _extract_status(data: object) -> str | None:
     return None
 
 
-def _extract_citation(data: object) -> dict[str, str | None] | None:
-    if not isinstance(data, dict):
-        return None
-    source = data.get("guideline_source") or data.get("source")
-    if not isinstance(source, str) or not source:
-        return None
-    section = data.get("section_reference") or data.get("section")
-    excerpt = data.get("excerpt")
-    return {
-        "guideline_source": source,
-        "section_reference": section if isinstance(section, str) and section else None,
-        "excerpt": excerpt if isinstance(excerpt, str) and excerpt else None,
-    }
+def _extract_output_text(data: object) -> str | None:
+    if isinstance(data, dict):
+        value = data.get("output_text")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _extract_citations(data: object) -> list[dict[str, str | None]]:
+    """Normalize the bot's citation payloads into chat.citations rows.
+
+    MeSquareAssistantBot emits `event: citations` with data shaped as
+    {"citations": [{"chunk_id", "guideline_title", "section_title", "excerpt"}]}
+    (built by its verifier node). A bare list or single-item payload is also
+    accepted defensively in case the bot's format evolves.
+    """
+    if isinstance(data, dict) and isinstance(data.get("citations"), list):
+        items: list[object] = data["citations"]
+    elif isinstance(data, list):
+        items = data
+    else:
+        items = [data]
+
+    result: list[dict[str, str | None]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        source = (
+            item.get("guideline_title")
+            or item.get("guideline_source")
+            or item.get("source")
+        )
+        if not isinstance(source, str) or not source:
+            continue
+        section = (
+            item.get("section_title")
+            or item.get("section_reference")
+            or item.get("section")
+        )
+        excerpt = item.get("excerpt")
+        result.append(
+            {
+                "guideline_source": source,
+                "section_reference": section if isinstance(section, str) and section else None,
+                "excerpt": excerpt if isinstance(excerpt, str) and excerpt else None,
+            }
+        )
+    return result
 
 async def _forward_bot_stream(
     bot_payload: dict[str, Any],
@@ -299,12 +336,15 @@ async def _forward_bot_stream(
                 text = _extract_token_text(data)
                 if text:
                     token_parts.append(text)
-            elif event == "citation":
-                citation = _extract_citation(data)
-                if citation is not None:
-                    citations.append(citation)
+            elif event in ("citations", "citation"):
+                citations.extend(_extract_citations(data))
             elif event == "status":
                 status_value = _extract_status(data)
+                # Early exits (emergency/off_topic/medication_prohibited)
+                # carry the bot's reply in output_text instead of token events.
+                output_text = _extract_output_text(data)
+                if output_text:
+                    token_parts.append(output_text)
                 if status_value in GUARDRAIL_EVENT_TYPES:
                     guardrail_types.add(status_value)
             yield _format_sse(event, data)

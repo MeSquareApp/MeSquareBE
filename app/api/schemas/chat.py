@@ -122,5 +122,5 @@ class MessagePage(BaseModel):
 
 class StreamEvent(BaseModel):
     """Wire format of every SSE event forwarded to the frontend."""
-    event: Literal["status", "token", "citation", "done", "error"]
+    event: Literal["status", "token", "citations", "done", "error"]
     data: str  # JSON serialization of the event-type-specific payload

@@ -48,19 +48,26 @@ def patient_client(auth):
 def fake_bot(monkeypatch):
     """Replace the assistant-bot HTTP call with canned (event, data) pairs."""
     holder = {
+        # Mirrors the real MeSquareAssistantBot SSE contract
+        # (POST /internal/v1/chat/stream): token events, a single citations
+        # event with a {"citations": [...]} wrapper, then done.
         "events": [
-            ("status", {"status": "generating"}),
             ("token", {"token": "Based on your labs, "}),
             ("token", {"token": "everything looks stable."}),
             (
-                "citation",
+                "citations",
                 {
-                    "guideline_source": "2023 ACC/AHA Multisociety Guideline",
-                    "section_reference": "Section 4.2",
-                    "excerpt": "Lifestyle changes are recommended first-line.",
+                    "citations": [
+                        {
+                            "chunk_id": "chunk-1",
+                            "guideline_title": "2023 ACC/AHA Multisociety Guideline",
+                            "section_title": "Section 4.2",
+                            "excerpt": "Lifestyle changes are recommended first-line.",
+                        }
+                    ]
                 },
             ),
-            ("done", {"finish_reason": "stop"}),
+            ("done", {"status": "success"}),
         ],
         "payloads": [],
     }
@@ -187,8 +194,8 @@ def test_stream_persists_messages_and_citations(patient_client, fake_bot):
     assert resp.headers["content-type"].startswith("text/event-stream")
 
     events = _parse_sse(resp.text)
-    assert [event for event, _ in events] == ["status", "token", "token", "citation", "done"]
-    assert events[1][1] == {"token": "Based on your labs, "}
+    assert [event for event, _ in events] == ["token", "token", "citations", "done"]
+    assert events[0][1] == {"token": "Based on your labs, "}
 
     # The payload sent to the bot is built server-side.
     payload = fake_bot["payloads"][0]
@@ -196,7 +203,8 @@ def test_stream_persists_messages_and_citations(patient_client, fake_bot):
     assert payload["conversation_id"] == conversation["id"]
     assert payload["history"] == []
     twin = payload["twin_context"]
-    assert twin["sex"] == "Female"
+    # sex is normalized to the bot's Literal["male", "female"] contract.
+    assert twin["sex"] == "female"
     assert twin["age"] is not None
 
     page = patient_client.get(f"{CHAT_PREFIX}/{conversation['id']}/messages").json()
@@ -231,8 +239,14 @@ def test_history_is_loaded_server_side(patient_client, fake_bot):
 def test_guardrail_events_are_recorded(patient_client, fake_bot):
     conversation = _create_conversation(patient_client)
     fake_bot["events"] = [
-        ("status", {"status": "medication_prohibited"}),
-        ("done", {"finish_reason": "guardrail"}),
+        (
+            "status",
+            {
+                "status": "medication_prohibited",
+                "output_text": "I cannot provide medication advice. Please consult your physician.",
+            },
+        ),
+        ("done", {"status": "medication_prohibited", "total_citations": 0}),
     ]
     resp = _stream_message(patient_client, conversation["id"], query="Can I take aspirin daily?")
     assert resp.status_code == 200
@@ -241,6 +255,36 @@ def test_guardrail_events_are_recorded(patient_client, fake_bot):
     assert _fetch_guardrail_events() == [
         ("medication_prohibited", "Can I take aspirin daily?")
     ]
+
+    # The early-exit reply (delivered in the status event's output_text, not
+    # as token events) is still persisted as the assistant message.
+    page = patient_client.get(f"{CHAT_PREFIX}/{conversation['id']}/messages").json()
+    assert [m["sender_type"] for m in page["messages"]] == ["user", "assistant"]
+    assert page["messages"][1]["content"] == (
+        "I cannot provide medication advice. Please consult your physician."
+    )
+
+
+def test_emergency_status_records_guardrail_event(patient_client, fake_bot):
+    conversation = _create_conversation(patient_client)
+    fake_bot["events"] = [
+        (
+            "status",
+            {
+                "status": "emergency",
+                "output_text": "EMERGENCY NOTICE: Please call 911 immediately.",
+            },
+        ),
+        ("done", {"status": "emergency", "total_citations": 0}),
+    ]
+    resp = _stream_message(patient_client, conversation["id"], query="I have chest pain")
+    assert resp.status_code == 200
+
+    assert _fetch_guardrail_events() == [("emergency", "I have chest pain")]
+    page = patient_client.get(f"{CHAT_PREFIX}/{conversation['id']}/messages").json()
+    assert page["messages"][1]["content"] == (
+        "EMERGENCY NOTICE: Please call 911 immediately."
+    )
 
 
 def test_bot_failure_emits_error_event(patient_client, fake_bot, monkeypatch):

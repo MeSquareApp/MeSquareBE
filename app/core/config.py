@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # MeSquareAssistantBot streaming endpoint. Points at the local bot in
     # development; set ASSISTANT_BOT_URL in the deployed environments.
     assistant_bot_url: str = Field(
-        default="http://localhost:8001/chat/stream",
+        default="http://localhost:8001/internal/v1/chat/stream",
         validation_alias="ASSISTANT_BOT_URL",
     )
     assistant_bot_api_key: str | None = Field(
@@ -37,7 +37,10 @@ class Settings(BaseSettings):
     @field_validator("auth0_audience")
     @classmethod
     def validate_auth0_audience(cls, value: str) -> str:
-        audience = value.strip()
+        # Normalize: the token's `aud` claim must match this value exactly
+        # (PyJWT uses strict string comparison), so strip any trailing slash
+        # that would silently break audience validation.
+        audience = value.strip().rstrip("/")
         if not audience or audience.lower() in {"null", "none"}:
             raise ValueError("AUTH0_AUDIENCE must be set to your Auth0 API identifier.")
         return audience
